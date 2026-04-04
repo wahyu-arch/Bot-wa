@@ -2,10 +2,51 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLat
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const Groq = require('groq-sdk');
+const http = require('http');
+const QRCode = require('qrcode');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
 const msgMemory = {};
+let currentQR = null;
+let isConnected = false;
+
+// Web server — buka Railway public URL untuk lihat QR
+const server = http.createServer(async (req, res) => {
+    if (isConnected) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<h2 style="font-family:sans-serif;color:green">✅ Bot sudah terhubung!</h2>');
+        return;
+    }
+    if (!currentQR) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<h2 style="font-family:sans-serif">⏳ Menunggu QR... refresh halaman ini.</h2>');
+        return;
+    }
+    try {
+        const qrImage = await QRCode.toDataURL(currentQR);
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`
+            <html>
+            <head>
+                <meta http-equiv="refresh" content="15">
+                <style>body{font-family:sans-serif;text-align:center;padding:30px}</style>
+            </head>
+            <body>
+                <h2>Scan QR ini dengan WhatsApp</h2>
+                <img src="${qrImage}" style="width:300px;height:300px"/>
+                <p style="color:gray">Halaman otomatis refresh tiap 15 detik</p>
+            </body>
+            </html>
+        `);
+    } catch (e) {
+        res.writeHead(500);
+        res.end('Error generate QR');
+    }
+});
+
+server.listen(process.env.PORT || 3000, () => {
+    console.log('🌐 Web server aktif — buka Railway public URL untuk scan QR');
+});
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
@@ -23,17 +64,18 @@ async function startBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         if (qr) {
-            const encodedQR = encodeURIComponent(qr);
-            console.log('\n=== SCAN QR ===');
-            console.log('Buka link ini di browser lalu scan QR-nya:');
-            console.log(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodedQR}`);
-            console.log('===============\n');
+            currentQR = qr;
+            isConnected = false;
+            console.log('QR baru tersedia — buka Railway public URL di browser');
         }
         if (connection === 'close') {
+            isConnected = false;
             const shouldReconnect = (lastDisconnect?.error instanceof Boom)
                 ?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) startBot();
         } else if (connection === 'open') {
+            isConnected = true;
+            currentQR = null;
             console.log('✅ Bot terhubung!');
         }
     });
@@ -43,8 +85,7 @@ async function startBot() {
         if (!msg.message || msg.key.fromMe) return;
 
         const sender = msg.key.remoteJid;
-        const isGroup = sender.endsWith('@g.us');
-        if (isGroup) return;
+        if (sender.endsWith('@g.us')) return;
 
         const pushName = msg.pushName || "seseorang";
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
@@ -78,7 +119,6 @@ Karakter kamu:
             });
 
             const reply = completion.choices[0].message.content;
-
             msgMemory[sender].push({ role: "assistant", content: reply });
             if (msgMemory[sender].length > 20) msgMemory[sender].shift();
 
