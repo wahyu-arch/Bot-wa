@@ -2,6 +2,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLat
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const Groq = require('groq-sdk');
+const qrcode = require('qrcode-terminal');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -14,7 +15,6 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: true,
         logger: pino({ level: 'silent' }),
         browser: ["Chrome", "Chrome", "120.0.0"]
     });
@@ -22,7 +22,12 @@ async function startBot() {
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
+        if (qr) {
+            console.log('\n======= SCAN QR INI =======');
+            qrcode.generate(qr, { small: true });
+            console.log('===========================\n');
+        }
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect?.error instanceof Boom)
                 ?.output?.statusCode !== DisconnectReason.loggedOut;
