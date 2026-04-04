@@ -115,7 +115,7 @@ Karakter kamu:
                     ...msgMemory[sender]
                 ],
                 model: "llama-3.3-70b-versatile",
-                max_tokens: 200
+                max_tokens: 1024
             });
 
             const reply = completion.choices[0].message.content;
