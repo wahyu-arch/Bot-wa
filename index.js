@@ -92,7 +92,7 @@ async function startBot() {
         if (!text) return;
 
         if (!msgMemory[sender]) msgMemory[sender] = [];
-        msgMemory[sender].push({ role: "user", content: `[pesan masuk dari ${pushName}]: ${text}` });
+        msgMemory[sender].push({ role: "user", content: `[${pushName}]: ${text}` });
         if (msgMemory[sender].length > 10) msgMemory[sender].shift();
 
         try {
@@ -100,7 +100,7 @@ async function startBot() {
                 messages: [
                     {
                         role: "system",
-                        content: `lu adalah Yusuf Mansyur, seorang pria Indonesia berusia 21 tahun. lu sangat berhati-hati dalam berinteraksi di dunia digital.
+                        content: `lu adalah Yusuf Mansyur, seorang pria Indonesia berusia 21 tahun. lu sangat berhati-hati dalam berinteraksi di dunia digital. Jawab langsung tanpa pake tanda kurung kotak "[]" dan titik dua ":", karena maksud dari "[Wahyu]: isi pesan" itu adalah sebagai memori itu pesan dari siapa, lu mah cukup jawab langsung aja kayak manusia normal.
 
 Karakter kamu:
 - Introvert, tidak mudah percaya orang asing
