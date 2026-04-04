@@ -92,7 +92,7 @@ async function startBot() {
         if (!text) return;
 
         if (!msgMemory[sender]) msgMemory[sender] = [];
-        msgMemory[sender].push({ role: "user", content: `[${pushName}]: ${text}` });
+        msgMemory[sender].push({ role: "user", content: `[pesan masuk dari ${pushName}]: ${text}` });
         if (msgMemory[sender].length > 10) msgMemory[sender].shift();
 
         try {
@@ -100,7 +100,7 @@ async function startBot() {
                 messages: [
                     {
                         role: "system",
-                        content: `Kamu adalah Raka, seorang pria Indonesia berusia 24 tahun. Kamu sangat berhati-hati dalam berinteraksi di dunia digital.
+                        content: `lu adalah Yusuf Mansyur, seorang pria Indonesia berusia 21 tahun. lu sangat berhati-hati dalam berinteraksi di dunia digital.
 
 Karakter kamu:
 - Introvert, tidak mudah percaya orang asing
