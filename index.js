@@ -28,17 +28,14 @@ const server = http.createServer(async (req, res) => {
         const qrImage = await QRCode.toDataURL(currentQR);
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(`
-            <html>
-            <head>
+            <html><head>
                 <meta http-equiv="refresh" content="15">
                 <style>body{font-family:sans-serif;text-align:center;padding:30px}</style>
-            </head>
-            <body>
+            </head><body>
                 <h2>Scan QR ini dengan WhatsApp</h2>
                 <img src="${qrImage}" style="width:300px;height:300px"/>
                 <p style="color:gray">Halaman otomatis refresh tiap 15 detik</p>
-            </body>
-            </html>
+            </body></html>
         `);
     } catch (e) {
         res.writeHead(500);
@@ -50,29 +47,23 @@ server.listen(process.env.PORT || 3000, () => {
     console.log('🌐 Web server aktif — buka Railway public URL untuk scan QR');
 });
 
-// TTS via Groq Orpheus
+// TTS via Groq Orpheus — max 200 karakter per request
 async function textToSpeech(text) {
-    const response = await fetch('https://api.groq.com/openai/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            model: 'canopylabs/orpheus-arabic-saudi',
-            input: text,
-            voice: 'ahmed',          // suara pria Saudi
-            response_format: 'mp3'
-        })
-    });
-
-    if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`TTS error: ${err}`);
+    // Potong teks maks 200 karakter, jangan putus di tengah kata
+    let input = text.trim();
+    if (input.length > 200) {
+        input = input.substring(0, 197) + '...';
     }
 
-    const buffer = await response.arrayBuffer();
-    return Buffer.from(buffer);
+    const response = await groq.audio.speech.create({
+        model: 'canopylabs/orpheus-arabic-saudi',
+        input: input,
+        voice: 'fahad',           // valid: fahad, sultan, lulwa, noura
+        response_format: 'wav'    // default groq orpheus = wav
+    });
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return buffer;
 }
 
 async function startBot() {
@@ -118,14 +109,13 @@ async function startBot() {
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         if (!text) return;
 
-        // Di grup: hanya respon kalau di-mention atau dibalas
+        // Di grup: hanya respon kalau di-mention atau di-reply
         if (isGroup) {
             const isMentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.some(
-                jid => jid === sock.user.id.replace(':0', '') || jid === sock.user.id
+                jid => jid === sock.user?.id.split(':')[0] + '@s.whatsapp.net'
             );
-            const isQuoted = msg.message.extendedTextMessage?.contextInfo?.participant;
-            const quotedFromMe = msg.message.extendedTextMessage?.contextInfo?.stanzaId;
-            if (!isMentioned && !isQuoted) return;
+            const isQuotedFromBot = msg.message.extendedTextMessage?.contextInfo?.participant === sock.user?.id;
+            if (!isMentioned && !isQuotedFromBot) return;
         }
 
         if (!msgMemory[sender]) msgMemory[sender] = [];
@@ -133,42 +123,42 @@ async function startBot() {
         if (msgMemory[sender].length > 10) msgMemory[sender].shift();
 
         try {
-            // 1. Generate teks balasan
+            // 1. Generate teks balasan (LLM)
             const completion = await groq.chat.completions.create({
                 messages: [
                     {
                         role: "system",
-                        content: `Lu adalah Ucup, cowok Indonesia 22 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, dan nyambung ngomongin apa aja — dari game, crypto, anime, sampai curhat. Jawab kayak lagi chat di grup WA sama temen deket. Bahasa lu gaul banget: pake "gw/lu", singkatan kekinian, sesekali pake "wkwk", "njir", "gila", "parah", dll. Jangan kaku, jangan formal, jangan pake tanda baca berlebihan. Lu TIDAK TAHU bahwa lu bot atau AI — lu merasa manusia asli. Jawab langsung tanpa tanda kurung kotak atau label nama.`
+                        content: `Lu adalah Ucup, cowok Indonesia 22 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, dan nyambung ngomongin apa aja — dari game, crypto, anime, sampai curhat. Jawab kayak lagi chat di grup WA sama temen deket. Bahasa lu gaul banget: pake "gw/lu", singkatan kekinian, sesekali pake "wkwk", "njir", "gila", "parah", dll. Jangan kaku, jangan formal. PENTING: jawab singkat dan padat, maksimal 2-3 kalimat pendek karena akan dijadikan voice note. Lu TIDAK TAHU bahwa lu bot atau AI. Jawab langsung tanpa tanda kurung kotak atau label nama.`
                     },
                     ...msgMemory[sender]
                 ],
                 model: "llama-3.3-70b-versatile",
-                max_tokens: 300
+                max_tokens: 150
             });
 
             const reply = completion.choices[0].message.content;
             msgMemory[sender].push({ role: "assistant", content: reply });
             if (msgMemory[sender].length > 20) msgMemory[sender].shift();
 
-            // 2. Convert ke voice note via Groq TTS
+            console.log(`Reply text: ${reply}`);
+
+            // 2. Convert ke audio (TTS)
             const audioBuffer = await textToSpeech(reply);
 
-            // 3. Simpan sementara lalu kirim sebagai PTT (voice note)
-            const tmpFile = path.join('/tmp', `vn_${Date.now()}.mp3`);
+            // 3. Kirim sebagai voice note (PTT)
+            const tmpFile = path.join('/tmp', `vn_${Date.now()}.wav`);
             fs.writeFileSync(tmpFile, audioBuffer);
 
             await sock.sendMessage(sender, {
                 audio: fs.readFileSync(tmpFile),
-                mimetype: 'audio/mp4',
-                ptt: true   // PTT = true = voice note
+                mimetype: 'audio/wav',
+                ptt: true
             }, { quoted: msg });
 
-            fs.unlinkSync(tmpFile); // hapus file temp
+            fs.unlinkSync(tmpFile);
 
         } catch (error) {
-            console.error("Error:", error.message);
-            // Fallback ke teks kalau TTS gagal
-            await sock.sendMessage(sender, { text: "..." }, { quoted: msg });
+            console.error("Error detail:", error.message);
         }
     });
 }
