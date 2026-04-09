@@ -6,6 +6,7 @@ const http = require('http');
 const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const msgMemory = {};
@@ -27,16 +28,11 @@ const server = http.createServer(async (req, res) => {
     try {
         const qrImage = await QRCode.toDataURL(currentQR);
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(`
-            <html><head>
-                <meta http-equiv="refresh" content="15">
-                <style>body{font-family:sans-serif;text-align:center;padding:30px}</style>
-            </head><body>
-                <h2>Scan QR ini dengan WhatsApp</h2>
-                <img src="${qrImage}" style="width:300px;height:300px"/>
-                <p style="color:gray">Halaman otomatis refresh tiap 15 detik</p>
-            </body></html>
-        `);
+        res.end(`<html><head><meta http-equiv="refresh" content="15">
+            <style>body{font-family:sans-serif;text-align:center;padding:30px}</style></head>
+            <body><h2>Scan QR ini dengan WhatsApp</h2>
+            <img src="${qrImage}" style="width:300px;height:300px"/>
+            <p style="color:gray">Halaman otomatis refresh tiap 15 detik</p></body></html>`);
     } catch (e) {
         res.writeHead(500);
         res.end('Error generate QR');
@@ -44,26 +40,38 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(process.env.PORT || 3000, () => {
-    console.log('🌐 Web server aktif — buka Railway public URL untuk scan QR');
+    console.log('🌐 Web server aktif');
 });
 
-// TTS via Groq Orpheus — max 200 karakter per request
-async function textToSpeech(text) {
-    // Potong teks maks 200 karakter, jangan putus di tengah kata
+// TTS: teks → WAV → OGG Opus (format yang diterima WA)
+async function textToVoiceNote(text) {
     let input = text.trim();
-    if (input.length > 200) {
-        input = input.substring(0, 197) + '...';
-    }
+    if (input.length > 200) input = input.substring(0, 197) + '...';
 
-    const response = await groq.audio.speech.create({
+    // 1. Groq TTS → WAV
+    const ttsResponse = await groq.audio.speech.create({
         model: 'canopylabs/orpheus-arabic-saudi',
-        input: input,
-        voice: 'fahad',           // valid: fahad, sultan, lulwa, noura
-        response_format: 'wav'    // default groq orpheus = wav
+        input,
+        voice: 'fahad',
+        response_format: 'wav'
     });
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    return buffer;
+    const wavBuffer = Buffer.from(await ttsResponse.arrayBuffer());
+    const tmpWav = `/tmp/vn_${Date.now()}.wav`;
+    const tmpOgg = tmpWav.replace('.wav', '.ogg');
+
+    fs.writeFileSync(tmpWav, wavBuffer);
+
+    // 2. Convert WAV → OGG Opus pakai ffmpeg
+    execSync(`ffmpeg -y -i ${tmpWav} -c:a libopus -b:a 128k ${tmpOgg}`);
+
+    const oggBuffer = fs.readFileSync(tmpOgg);
+
+    // Cleanup
+    fs.unlinkSync(tmpWav);
+    fs.unlinkSync(tmpOgg);
+
+    return oggBuffer;
 }
 
 async function startBot() {
@@ -104,61 +112,62 @@ async function startBot() {
 
         const sender = msg.key.remoteJid;
         const isGroup = sender.endsWith('@g.us');
-
         const pushName = msg.pushName || "seseorang";
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const text = msg.message.conversation
+            || msg.message.extendedTextMessage?.text
+            || "";
+
         if (!text) return;
 
-        // Di grup: hanya respon kalau di-mention atau di-reply
+        // Grup: hanya balas kalau di-mention atau reply ke bot
         if (isGroup) {
-            const isMentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.some(
-                jid => jid === sock.user?.id.split(':')[0] + '@s.whatsapp.net'
-            );
-            const isQuotedFromBot = msg.message.extendedTextMessage?.contextInfo?.participant === sock.user?.id;
-            if (!isMentioned && !isQuotedFromBot) return;
+            const botJid = sock.user?.id?.split(':')[0] + '@s.whatsapp.net';
+            const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const isMentioned = mentioned.includes(botJid);
+            const isRepliedToBot = msg.message.extendedTextMessage?.contextInfo?.participant === botJid;
+            if (!isMentioned && !isRepliedToBot) return;
         }
+
+        console.log(`Pesan dari ${pushName} (${sender}): ${text}`);
 
         if (!msgMemory[sender]) msgMemory[sender] = [];
         msgMemory[sender].push({ role: "user", content: `[${pushName}]: ${text}` });
         if (msgMemory[sender].length > 10) msgMemory[sender].shift();
 
         try {
-            // 1. Generate teks balasan (LLM)
+            // 1. Generate teks balasan
             const completion = await groq.chat.completions.create({
                 messages: [
                     {
                         role: "system",
-                        content: `Lu adalah Yusuf jauhari, cowok Indonesia 21 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, dan nyambung ngomongin apa aja — dari game, crypto, anime, sampai curhat. Jawab kayak lagi chat di grup WA sama temen deket. Bahasa lu gaul banget: pake "gw/lu", singkatan kekinian, sesekali pake "wkwk", "njir", "gila", "parah", "cui", dll. Jangan kaku, jangan formal. PENTING: jawab singkat dan padat, maksimal 2-3 kalimat pendek karena akan dijadikan voice note. Lu TIDAK TAHU bahwa lu bot atau AI. Jawab langsung tanpa tanda kurung kotak atau label nama.`
+                        content: `Lu adalah Ucup, cowok Indonesia 22 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, dan nyambung ngomongin apa aja — dari game, crypto, anime, sampai curhat. Bahasa lu gaul: pake gw/lu, singkatan kekinian, sesekali wkwk/njir/gila. Jangan kaku dan formal. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
                     },
                     ...msgMemory[sender]
                 ],
                 model: "llama-3.3-70b-versatile",
-                max_tokens: 150
+                max_tokens: 100
             });
 
-            const reply = completion.choices[0].message.content;
+            const reply = completion.choices[0].message.content.trim();
             msgMemory[sender].push({ role: "assistant", content: reply });
             if (msgMemory[sender].length > 20) msgMemory[sender].shift();
 
-            console.log(`Reply text: ${reply}`);
+            console.log(`Balas: ${reply}`);
 
-            // 2. Convert ke audio (TTS)
-            const audioBuffer = await textToSpeech(reply);
+            // 2. TTS → OGG
+            const oggBuffer = await textToVoiceNote(reply);
 
-            // 3. Kirim sebagai voice note (PTT)
-            const tmpFile = path.join('/tmp', `vn_${Date.now()}.wav`);
-            fs.writeFileSync(tmpFile, audioBuffer);
-
+            // 3. Kirim voice note
             await sock.sendMessage(sender, {
-                audio: fs.readFileSync(tmpFile),
-                mimetype: 'audio/wav',
+                audio: oggBuffer,
+                mimetype: 'audio/ogg; codecs=opus',
                 ptt: true
             }, { quoted: msg });
 
-            fs.unlinkSync(tmpFile);
+            console.log('✅ Voice note terkirim');
 
         } catch (error) {
-            console.error("Error detail:", error.message);
+            console.error("❌ Error:", error.message);
         }
     });
 }
