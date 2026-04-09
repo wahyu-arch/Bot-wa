@@ -43,12 +43,12 @@ server.listen(process.env.PORT || 3000, () => {
     console.log('🌐 Web server aktif');
 });
 
-// TTS: teks → WAV → OGG Opus (format yang diterima WA)
 async function textToVoiceNote(text) {
     let input = text.trim();
     if (input.length > 200) input = input.substring(0, 197) + '...';
 
-    // 1. Groq TTS → WAV
+    console.log(`🔊 TTS input: "${input}"`);
+
     const ttsResponse = await groq.audio.speech.create({
         model: 'canopylabs/orpheus-arabic-saudi',
         input,
@@ -57,20 +57,26 @@ async function textToVoiceNote(text) {
     });
 
     const wavBuffer = Buffer.from(await ttsResponse.arrayBuffer());
+    console.log(`🔊 WAV size: ${wavBuffer.length} bytes`);
+
     const tmpWav = `/tmp/vn_${Date.now()}.wav`;
     const tmpOgg = tmpWav.replace('.wav', '.ogg');
-
     fs.writeFileSync(tmpWav, wavBuffer);
 
-    // 2. Convert WAV → OGG Opus pakai ffmpeg
-    execSync(`ffmpeg -y -i ${tmpWav} -c:a libopus -b:a 128k ${tmpOgg}`);
+    // Check ffmpeg tersedia
+    try {
+        execSync('which ffmpeg');
+    } catch(e) {
+        console.error('❌ ffmpeg tidak ditemukan!');
+        throw new Error('ffmpeg not found');
+    }
+
+    execSync(`ffmpeg -y -i ${tmpWav} -c:a libopus -b:a 128k ${tmpOgg} 2>&1`);
+    console.log(`🔊 OGG size: ${fs.statSync(tmpOgg).size} bytes`);
 
     const oggBuffer = fs.readFileSync(tmpOgg);
-
-    // Cleanup
     fs.unlinkSync(tmpWav);
     fs.unlinkSync(tmpOgg);
-
     return oggBuffer;
 }
 
@@ -92,7 +98,7 @@ async function startBot() {
         if (qr) {
             currentQR = qr;
             isConnected = false;
-            console.log('QR baru tersedia — buka Railway public URL di browser');
+            console.log('QR baru tersedia');
         }
         if (connection === 'close') {
             isConnected = false;
@@ -102,16 +108,12 @@ async function startBot() {
         } else if (connection === 'open') {
             isConnected = true;
             currentQR = null;
-            console.log('✅ Bot terhubung!');
+            console.log('✅ Bot terhubung! JID:', sock.user?.id);
         }
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        console.log(`📨 upsert type: ${type}, count: ${messages.length}`);
         const msg = messages[0];
-        console.log(`📨 fromMe: ${msg.key.fromMe}, remoteJid: ${msg.key.remoteJid}`);
-        console.log(`📨 msgType: ${JSON.stringify(Object.keys(msg.message || {}))}`);
-
         if (!msg.message || msg.key.fromMe) return;
 
         const sender = msg.key.remoteJid;
@@ -121,32 +123,33 @@ async function startBot() {
             || msg.message.extendedTextMessage?.text
             || "";
 
-        console.log(`📨 isGroup: ${isGroup}, text: "${text}"`);
-
         if (!text) return;
 
-        // Grup: hanya balas kalau di-mention atau reply ke bot
+        // Grup: balas kalau ada @mention angka bot di teks, atau reply ke bot
         if (isGroup) {
-            const botJid = sock.user?.id?.split(':')[0] + '@s.whatsapp.net';
-            const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const isMentioned = mentioned.includes(botJid);
-            const isRepliedToBot = msg.message.extendedTextMessage?.contextInfo?.participant === botJid;
-            if (!isMentioned && !isRepliedToBot) return;
+            const botNumber = sock.user?.id?.split(':')[0].split('@')[0]; // angka saja
+            const isMentionedInText = botNumber && text.includes(botNumber);
+            const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const isMentionedJid = mentionedJids.some(j => j.includes(botNumber));
+            const isReply = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+
+            console.log(`Grup check — botNumber: ${botNumber}, inText: ${isMentionedInText}, inJid: ${isMentionedJid}, isReply: ${isReply}`);
+
+            if (!isMentionedInText && !isMentionedJid && !isReply) return;
         }
 
-        console.log(`Pesan dari ${pushName} (${sender}): ${text}`);
+        console.log(`Pesan dari ${pushName}: ${text}`);
 
         if (!msgMemory[sender]) msgMemory[sender] = [];
         msgMemory[sender].push({ role: "user", content: `[${pushName}]: ${text}` });
         if (msgMemory[sender].length > 10) msgMemory[sender].shift();
 
         try {
-            // 1. Generate teks balasan
             const completion = await groq.chat.completions.create({
                 messages: [
                     {
                         role: "system",
-                        content: `Lu adalah Ucup, cowok Indonesia 22 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, dan nyambung ngomongin apa aja — dari game, crypto, anime, sampai curhat. Bahasa lu gaul: pake gw/lu, singkatan kekinian, sesekali wkwk/njir/gila. Jangan kaku dan formal. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
+                        content: `Lu adalah Ucup, cowok Indonesia 22 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, nyambung ngomongin apa aja — game, crypto, anime, curhat. Bahasa lu gaul: gw/lu, singkatan kekinian, wkwk/njir/gila. Jangan kaku dan formal. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
                     },
                     ...msgMemory[sender]
                 ],
@@ -157,13 +160,12 @@ async function startBot() {
             const reply = completion.choices[0].message.content.trim();
             msgMemory[sender].push({ role: "assistant", content: reply });
             if (msgMemory[sender].length > 20) msgMemory[sender].shift();
-
             console.log(`Balas: ${reply}`);
 
-            // 2. TTS → OGG
+            console.log(`🔊 Mulai TTS...`);
             const oggBuffer = await textToVoiceNote(reply);
+            console.log(`🔊 OGG size: ${oggBuffer.length} bytes`);
 
-            // 3. Kirim voice note
             await sock.sendMessage(sender, {
                 audio: oggBuffer,
                 mimetype: 'audio/ogg; codecs=opus',
@@ -174,6 +176,7 @@ async function startBot() {
 
         } catch (error) {
             console.error("❌ Error:", error.message);
+            console.error(error.stack);
         }
     });
 }
