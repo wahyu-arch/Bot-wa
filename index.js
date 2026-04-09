@@ -106,8 +106,12 @@ async function startBot() {
         }
     });
 
-    sock.ev.on('messages.upsert', async ({ messages }) => {
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        console.log(`📨 upsert type: ${type}, count: ${messages.length}`);
         const msg = messages[0];
+        console.log(`📨 fromMe: ${msg.key.fromMe}, remoteJid: ${msg.key.remoteJid}`);
+        console.log(`📨 msgType: ${JSON.stringify(Object.keys(msg.message || {}))}`);
+
         if (!msg.message || msg.key.fromMe) return;
 
         const sender = msg.key.remoteJid;
@@ -116,6 +120,8 @@ async function startBot() {
         const text = msg.message.conversation
             || msg.message.extendedTextMessage?.text
             || "";
+
+        console.log(`📨 isGroup: ${isGroup}, text: "${text}"`);
 
         if (!text) return;
 
