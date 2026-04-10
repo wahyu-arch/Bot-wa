@@ -49,12 +49,24 @@ async function textToVoiceNote(text) {
 
     console.log(`🔊 TTS input: "${input}"`);
 
-    const ttsResponse = await groq.audio.speech.create({
-        model: 'canopylabs/orpheus-arabic-saudi',
-        input,
-        voice: 'fahad',
-        response_format: 'wav'
+    const ttsResponse = await fetch('https://api.groq.com/openai/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model: 'canopylabs/orpheus-arabic-saudi',
+            input,
+            voice: 'fahad',
+            response_format: 'wav'
+        })
     });
+
+    if (!ttsResponse.ok) {
+        const errText = await ttsResponse.text();
+        throw new Error(`TTS API error ${ttsResponse.status}: ${errText}`);
+    }
 
     const wavBuffer = Buffer.from(await ttsResponse.arrayBuffer());
     console.log(`🔊 WAV size: ${wavBuffer.length} bytes`);
