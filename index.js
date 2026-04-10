@@ -43,10 +43,10 @@ server.listen(process.env.PORT || 3000, () => {
     console.log('🌐 Web server aktif');
 });
 
+// TTS: teks → WAV → OGG Opus
 async function textToVoiceNote(text) {
     let input = text.trim();
     if (input.length > 200) input = input.substring(0, 197) + '...';
-
     console.log(`🔊 TTS input: "${input}"`);
 
     const ttsResponse = await fetch('https://api.groq.com/openai/v1/audio/speech', {
@@ -75,14 +75,6 @@ async function textToVoiceNote(text) {
     const tmpOgg = tmpWav.replace('.wav', '.ogg');
     fs.writeFileSync(tmpWav, wavBuffer);
 
-    // Check ffmpeg tersedia
-    try {
-        execSync('which ffmpeg');
-    } catch(e) {
-        console.error('❌ ffmpeg tidak ditemukan!');
-        throw new Error('ffmpeg not found');
-    }
-
     execSync(`ffmpeg -y -i ${tmpWav} -c:a libopus -b:a 128k ${tmpOgg} 2>&1`);
     console.log(`🔊 OGG size: ${fs.statSync(tmpOgg).size} bytes`);
 
@@ -110,7 +102,7 @@ async function startBot() {
         if (qr) {
             currentQR = qr;
             isConnected = false;
-            console.log('QR baru tersedia');
+            console.log('QR baru tersedia — buka Railway public URL di browser');
         }
         if (connection === 'close') {
             isConnected = false;
@@ -120,7 +112,7 @@ async function startBot() {
         } else if (connection === 'open') {
             isConnected = true;
             currentQR = null;
-            console.log('✅ Bot terhubung! JID:', sock.user?.id);
+            console.log(`✅ Bot terhubung! JID: ${sock.user?.id}`);
         }
     });
 
@@ -137,18 +129,17 @@ async function startBot() {
 
         if (!text) return;
 
-        // Grup: balas kalau ada @mention angka bot di teks, atau reply ke bot
+        // Grup: balas kalau di-mention atau reply ke bot
         if (isGroup) {
             const botNumber = sock.user?.id?.split(':')[0].split('@')[0];
-            const isMentionedInText = botNumber && text.includes(botNumber);
             const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const isMentionedJid = mentionedJids.some(j => j.includes(botNumber));
-            console.log(`mentionedJids: ${JSON.stringify(mentionedJids)}, botNumber: ${botNumber}`);
-            const isReply = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-
-            console.log(`Grup check — botNumber: ${botNumber}, inText: ${isMentionedInText}, inJid: ${isMentionedJid}, isReply: ${isReply}`);
-
-            if (!isMentionedInText && !isMentionedJid && !isReply) return;
+            // Handle @lid dan @s.whatsapp.net
+            const isMentioned = mentionedJids.some(j =>
+                j.replace('@lid', '').replace('@s.whatsapp.net', '') === botNumber
+            );
+            const isReply = msg.message.extendedTextMessage?.contextInfo?.participant?.includes(botNumber);
+            console.log(`Grup — bot: ${botNumber}, mentionedRaw: ${JSON.stringify(mentionedJids)}, isMentioned: ${isMentioned}, isReply: ${isReply}`);
+            if (!isMentioned && !isReply) return;
         }
 
         console.log(`Pesan dari ${pushName}: ${text}`);
@@ -162,7 +153,7 @@ async function startBot() {
                 messages: [
                     {
                         role: "system",
-                        content: `Lu adalah Yusuf jauhari, cowok Indonesia 21 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, nyambung ngomongin apa aja — game, crypto, anime, curhat. Bahasa lu gaul: gua/lu, singkatan kekinian, astaga/njir/gila. Setiap ngomong, diakhir kalimat harus ada kata (chui) untuk ngomong biasa atau nyampaikan pendapat dengan santai, (rek) untuk bertanya, (woilah) untuk kaget, dan (njir) untuk menegaskan kalimat. Jangan kaku dan formal, jangan pake kata Bro/sis, dan jangan terlalu banyak koma (,) harus lancar ngomongnya. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note, jadi ngomongnya kayak lagi ngevoice note di WA. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
+                        content: `Lu adalah Yusuf jauhari, atau biasa dipanggil Yusuf, teman akrab di grup WhatsAp bernama AE atau Alter Egg. Gunakan gaya bahasa santai, gaul, dan kasual (jangan aku/kamu tapi pake gua-lu, bahasa tongkrongan, atau slang kekinian). Gaya Bicara: Jangan kaku, Jangan terlalu banyak ngomong, Gunakan interjeksi diakhir kalimat kayak, (njir) buat menegaskan sesuatu, (chui) buat ngomong santai, atau (ang ang ang) kalo bercanda, tapi jangan pernah pake kata (bro). Responnya harus berasa kayak kita lagi chattingan di grup WhatsApp atau nongkrong di kafe.  No Robot Talk: Jangan pernah pake kalimat (Sebagai model bahasa AI...) atau (Saya di sini untuk membantu), Langsung aja gas kayak temen. Jangan terlalu banyak tanda koma, kecuali kalo enak di baca boleh pake tanda koma, dan jangan pake tanda seru. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
                     },
                     ...msgMemory[sender]
                 ],
@@ -177,7 +168,6 @@ async function startBot() {
 
             console.log(`🔊 Mulai TTS...`);
             const oggBuffer = await textToVoiceNote(reply);
-            console.log(`🔊 OGG size: ${oggBuffer.length} bytes`);
 
             await sock.sendMessage(sender, {
                 audio: oggBuffer,
