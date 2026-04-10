@@ -58,7 +58,7 @@ async function textToVoiceNote(text) {
         body: JSON.stringify({
             model: 'canopylabs/orpheus-arabic-saudi',
             input,
-            voice: 'sultan',
+            voice: 'lulwa',
             response_format: 'wav'
         })
     });
