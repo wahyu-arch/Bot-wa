@@ -43,10 +43,10 @@ server.listen(process.env.PORT || 3000, () => {
     console.log('🌐 Web server aktif');
 });
 
-// TTS: teks → WAV → OGG Opus
 async function textToVoiceNote(text) {
     let input = text.trim();
     if (input.length > 200) input = input.substring(0, 197) + '...';
+
     console.log(`🔊 TTS input: "${input}"`);
 
     const ttsResponse = await fetch('https://api.groq.com/openai/v1/audio/speech', {
@@ -58,7 +58,7 @@ async function textToVoiceNote(text) {
         body: JSON.stringify({
             model: 'canopylabs/orpheus-arabic-saudi',
             input,
-            voice: 'fahad',
+            voice: 'sultan',
             response_format: 'wav'
         })
     });
@@ -74,6 +74,14 @@ async function textToVoiceNote(text) {
     const tmpWav = `/tmp/vn_${Date.now()}.wav`;
     const tmpOgg = tmpWav.replace('.wav', '.ogg');
     fs.writeFileSync(tmpWav, wavBuffer);
+
+    // Check ffmpeg tersedia
+    try {
+        execSync('which ffmpeg');
+    } catch(e) {
+        console.error('❌ ffmpeg tidak ditemukan!');
+        throw new Error('ffmpeg not found');
+    }
 
     execSync(`ffmpeg -y -i ${tmpWav} -c:a libopus -b:a 128k ${tmpOgg} 2>&1`);
     console.log(`🔊 OGG size: ${fs.statSync(tmpOgg).size} bytes`);
@@ -102,7 +110,7 @@ async function startBot() {
         if (qr) {
             currentQR = qr;
             isConnected = false;
-            console.log('QR baru tersedia — buka Railway public URL di browser');
+            console.log('QR baru tersedia');
         }
         if (connection === 'close') {
             isConnected = false;
@@ -112,7 +120,7 @@ async function startBot() {
         } else if (connection === 'open') {
             isConnected = true;
             currentQR = null;
-            console.log(`✅ Bot terhubung! JID: ${sock.user?.id}`);
+            console.log('✅ Bot terhubung! JID:', sock.user?.id);
         }
     });
 
@@ -129,17 +137,18 @@ async function startBot() {
 
         if (!text) return;
 
-        // Grup: balas kalau di-mention atau reply ke bot
+        // Grup: balas kalau ada @mention angka bot di teks, atau reply ke bot
         if (isGroup) {
             const botNumber = sock.user?.id?.split(':')[0].split('@')[0];
+            const isMentionedInText = botNumber && text.includes(botNumber);
             const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            // Handle @lid dan @s.whatsapp.net
-            const isMentioned = mentionedJids.some(j =>
-                j.replace('@lid', '').replace('@s.whatsapp.net', '') === botNumber
-            );
+            const isMentionedJid = mentionedJids.some(j => j.includes(botNumber));
+            console.log(`mentionedJids: ${JSON.stringify(mentionedJids)}, botNumber: ${botNumber}`);
             const isReply = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-            console.log(`Grup — bot: ${botNumber}, mentioned: ${JSON.stringify(mentionedJids)}, isMentioned: ${isMentioned}, isReply: ${isReply}`);
-            if (!isMentioned && !isReply) return;
+
+            console.log(`Grup check — botNumber: ${botNumber}, inText: ${isMentionedInText}, inJid: ${isMentionedJid}, isReply: ${isReply}`);
+
+            if (!isMentionedInText && !isMentionedJid && !isReply) return;
         }
 
         console.log(`Pesan dari ${pushName}: ${text}`);
@@ -153,7 +162,7 @@ async function startBot() {
                 messages: [
                     {
                         role: "system",
-                        content: `Lu adalah Ucup, cowok Indonesia 22 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, nyambung ngomongin apa aja — game, crypto, anime, curhat. Bahasa lu gaul: gw/lu, singkatan kekinian, wkwk/njir/gila. Jangan kaku dan formal. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
+                        content: `Lu adalah Yusuf jauhari, cowok Indonesia 21 tahun, asik banget di tongkrongan. Lu gaul, santai, suka bercanda, nyambung ngomongin apa aja — game, crypto, anime, curhat. Bahasa lu gaul: gw/lu, singkatan kekinian, wkwk/njir/gila. Setiap ngomong, diakhir kalimat harus ada kata (cui) untuk ngomong biasa atau nyampaikan pendapat dengan santai, dan (njir) untuk menegaskan kalimat. Jangan kaku dan formal. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
                     },
                     ...msgMemory[sender]
                 ],
@@ -168,6 +177,7 @@ async function startBot() {
 
             console.log(`🔊 Mulai TTS...`);
             const oggBuffer = await textToVoiceNote(reply);
+            console.log(`🔊 OGG size: ${oggBuffer.length} bytes`);
 
             await sock.sendMessage(sender, {
                 audio: oggBuffer,
