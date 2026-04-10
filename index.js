@@ -137,13 +137,14 @@ async function startBot() {
 
         if (!text) return;
 
-        // Grup: balas kalau ada @mention angka bot di teks, atau reply ke bot
+        // Grup: balas kalau ada @mention bot, atau reply ke bot
         if (isGroup) {
             const botNumber = sock.user?.id?.split(':')[0].split('@')[0];
-            const isMentionedInText = botNumber && text.includes(botNumber);
             const mentionedJids = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const isMentionedJid = mentionedJids.some(j => j.includes(botNumber));
             console.log(`mentionedJids: ${JSON.stringify(mentionedJids)}, botNumber: ${botNumber}`);
+            const isMentionedJid = mentionedJids.some(j => j.replace('@lid','').replace('@s.whatsapp.net','') === botNumber);
+            const isMentionedInText = botNumber && text.includes(botNumber);
+            const isReply = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
             const isReply = !!msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
             console.log(`Grup check — botNumber: ${botNumber}, inText: ${isMentionedInText}, inJid: ${isMentionedJid}, isReply: ${isReply}`);
