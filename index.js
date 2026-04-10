@@ -112,7 +112,7 @@ async function startBot() {
         } else if (connection === 'open') {
             isConnected = true;
             currentQR = null;
-            console.log(`✅ Bot terhubung! JID: ${sock.user?.id}`);
+            console.log(`✅ Bot terhubung! JID: ${sock.user?.id}, LID: ${sock.user?.lid}`);
         }
     });
 
@@ -132,20 +132,22 @@ async function startBot() {
         // Grup: balas kalau di-mention atau reply ke pesan bot
         if (isGroup) {
             const botNumber = sock.user?.id?.split(':')[0].split('@')[0];
+            const botLid = sock.user?.lid?.split(':')[0].split('@')[0];
             const ctxInfo = msg.message.extendedTextMessage?.contextInfo;
             const mentionedJids = ctxInfo?.mentionedJid || [];
 
-            // Cek mention — strip semua suffix
-            const isMentioned = mentionedJids.some(j =>
-                j.split('@')[0] === botNumber
-            );
+            // Cek mention — bandingkan dengan nomor HP dan LID
+            const isMentioned = mentionedJids.some(j => {
+                const stripped = j.split('@')[0].split(':')[0];
+                return stripped === botNumber || stripped === botLid;
+            });
 
-            // Cek reply ke pesan bot — participant berisi JID pengirim pesan yang di-quote
+            // Cek reply ke pesan bot
             const quotedParticipant = ctxInfo?.participant || '';
-            const isReply = quotedParticipant.split('@')[0] === botNumber
-                || quotedParticipant.split(':')[0] === botNumber;
+            const qStripped = quotedParticipant.split('@')[0].split(':')[0];
+            const isReply = qStripped === botNumber || qStripped === botLid;
 
-            console.log(`Grup — bot: ${botNumber}, mentionedRaw: ${JSON.stringify(mentionedJids)}, isMentioned: ${isMentioned}, quotedParticipant: ${quotedParticipant}, isReply: ${isReply}`);
+            console.log(`Grup — botNum: ${botNumber}, botLid: ${botLid}, mentionedRaw: ${JSON.stringify(mentionedJids)}, isMentioned: ${isMentioned}, qParticipant: ${quotedParticipant}, isReply: ${isReply}`);
             if (!isMentioned && !isReply) return;
         }
 
