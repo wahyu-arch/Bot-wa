@@ -49,38 +49,19 @@ async function textToVoiceNote(text) {
 
     console.log(`🔊 TTS input: "${input}"`);
 
-    // ElevenLabs TTS - voice "Putra"
-    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-    const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'putra'; // Set voice ID di env atau ganti manual
-
-    const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
-        method: 'POST',
-        headers: {
-            'xi-api-key': ELEVENLABS_API_KEY,
-            'Content-Type': 'application/json',
-            'Accept': 'audio/mpeg'
-        },
-        body: JSON.stringify({
-            text: input,
-            model_id: 'eleven_multilingual_v2',
-            voice_settings: {
-                stability: 0.5,
-                similarity_boost: 0.75
-            }
-        })
+    const ttsResponse = await groq.audio.speech.create({
+        model: 'canopylabs/orpheus-arabic-saudi',
+        input,
+        voice: 'fahad',
+        response_format: 'wav'
     });
 
-    if (!ttsResponse.ok) {
-        const errText = await ttsResponse.text();
-        throw new Error(`ElevenLabs TTS error: ${ttsResponse.status} - ${errText}`);
-    }
+    const wavBuffer = Buffer.from(await ttsResponse.arrayBuffer());
+    console.log(`🔊 WAV size: ${wavBuffer.length} bytes`);
 
-    const mp3Buffer = Buffer.from(await ttsResponse.arrayBuffer());
-    console.log(`🔊 MP3 size: ${mp3Buffer.length} bytes`);
-
-    const tmpMp3 = `/tmp/vn_${Date.now()}.mp3`;
-    const tmpOgg = tmpMp3.replace('.mp3', '.ogg');
-    fs.writeFileSync(tmpMp3, mp3Buffer);
+    const tmpWav = `/tmp/vn_${Date.now()}.wav`;
+    const tmpOgg = tmpWav.replace('.wav', '.ogg');
+    fs.writeFileSync(tmpWav, wavBuffer);
 
     // Check ffmpeg tersedia
     try {
@@ -90,11 +71,11 @@ async function textToVoiceNote(text) {
         throw new Error('ffmpeg not found');
     }
 
-    execSync(`ffmpeg -y -i ${tmpMp3} -c:a libopus -b:a 128k ${tmpOgg} 2>&1`);
+    execSync(`ffmpeg -y -i ${tmpWav} -c:a libopus -b:a 128k ${tmpOgg} 2>&1`);
     console.log(`🔊 OGG size: ${fs.statSync(tmpOgg).size} bytes`);
 
     const oggBuffer = fs.readFileSync(tmpOgg);
-    fs.unlinkSync(tmpMp3);
+    fs.unlinkSync(tmpWav);
     fs.unlinkSync(tmpOgg);
     return oggBuffer;
 }
